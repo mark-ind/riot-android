@@ -20,6 +20,7 @@
 package im.vector.activity;
 
 import android.Manifest;
+import android.animation.Animator;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.ActivityOptions;
@@ -32,12 +33,16 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Vibrator;
+import android.text.Editable;
 import android.text.SpannableStringBuilder;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.text.style.ClickableSpan;
 import android.text.style.URLSpan;
+import android.util.DisplayMetrics;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -45,6 +50,11 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.Animation;
+import android.view.animation.AnimationUtils;
+import android.view.animation.DecelerateInterpolator;
+import android.view.animation.LinearInterpolator;
+import android.view.animation.OvershootInterpolator;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
@@ -93,12 +103,16 @@ import org.matrix.androidsdk.rest.model.StateEvent;
 import org.matrix.androidsdk.rest.model.User;
 import org.matrix.androidsdk.rest.model.message.Message;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -233,6 +247,9 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     @BindView(R.id.editText_messageBox)
     VectorAutoCompleteTextView mEditText;
 
+    //@BindView(R.id.editText_messageBox)
+    //VectorAutoCompleteTextView mEditText;
+
     @BindView(R.id.room_self_avatar)
     ImageView mAvatarImageView;
 
@@ -244,6 +261,8 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     @BindView(R.id.room_bottom_layout)
     View mBottomLayout;
+    @BindView(R.id.layoutSlideCancel)
+    View layoutSlideCancel;
 
     @BindView(R.id.room_encrypted_image_view)
     ImageView mE2eImageView;
@@ -254,6 +273,17 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     @BindView(R.id.room_end_call_image_view)
     View mStopCallLayout;
+
+    @BindView(R.id.layoutLock)
+    View layoutLock;
+
+    @BindView(R.id.layoutDustin)
+    View layoutDustin;
+
+    @BindView(R.id.dustin_cover)
+    View dustin_cover;
+    @BindView(R.id.dustin)
+    View dustin;
 
     // action bar header
     @BindView(R.id.room_action_bar_title)
@@ -287,8 +317,28 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     @BindView(R.id.action_bar_header_room_topic)
     TextView mActionBarHeaderRoomTopic;
 
+    @BindView(R.id.textViewTime)
+    TextView timeText;
+
     @BindView(R.id.room_header_avatar)
     ImageView mActionBarHeaderRoomAvatar;
+
+    @BindView(R.id.imageViewMic)
+    ImageView imageViewMic;
+    @BindView(R.id.imageViewLockArrow)
+    ImageView imageViewLockArrow;
+
+    @BindView(R.id.imageViewLock)
+    ImageView imageViewLock;
+
+    @BindView(R.id.imageViewStop)
+    View imageViewStop;
+
+    @BindView(R.id.imageSend)
+    ImageView imageSend;
+
+    @BindView(R.id.imageViewSend)
+    View imageViewSend;
 
     // notifications area
     @BindView(R.id.room_notifications_area)
@@ -303,6 +353,11 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     // room preview
     @BindView(R.id.room_preview_info_layout)
     View mRoomPreviewLayout;
+//    @BindView(R.id.layoutEffect1)
+    //  View layoutEffect1;
+
+    //@BindView(R.id.layoutEffect2)
+    //View layoutEffect2;
 
     // medias sending helper
     private VectorRoomMediasSender mVectorRoomMediasSender;
@@ -329,8 +384,13 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     @BindView(R.id.room_preview_invitation_textview)
     TextView invitationTextView;
-    @BindView(R.id.room_preview_subinvitation_textview)
-    TextView subInvitationTextView;
+
+    @BindView(R.id.imageViewAudio)
+    View imageViewAudio;
+
+    @BindView(R.id.imageAudio)
+    View imageAudio;
+
 
     // network events
     private final IMXNetworkEventListener mNetworkEventListener = new IMXNetworkEventListener() {
@@ -634,6 +694,8 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             CommonActivityUtils.restartApp(this);
             return;
         }
+
+        setupRecording();
 
         final Intent intent = getIntent();
         if (!intent.hasExtra(EXTRA_ROOM_ID)) {
@@ -3239,6 +3301,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         // On mobile side, the modal to allow to add a reason to ban/kick someone isn't yet implemented
         // That's why, we don't display the TextView "Motif :" for now.
         TextView subInvitationTextView = findViewById(R.id.room_preview_subinvitation_textview);
+
         if (!TextUtils.isEmpty(member.reason)) {
             final String reason = getString(R.string.reason_colon, member.reason);
             subInvitationTextView.setText(reason);
@@ -3448,14 +3511,14 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             } else {
                 if ((null != roomEmailInvitation) && !TextUtils.isEmpty(roomEmailInvitation.email)) {
                     invitationTextView.setText(getString(R.string.room_preview_invitation_format, roomEmailInvitation.inviterName));
-                    subInvitationTextView.setText(getString(R.string.room_preview_unlinked_email_warning, roomEmailInvitation.email));
+                    //subInvitationTextView.setText(getString(R.string.room_preview_unlinked_email_warning, roomEmailInvitation.email));
                 } else {
                     invitationTextView.setText(getString(R.string.room_preview_try_join_an_unknown_room,
                             TextUtils.isEmpty(sRoomPreviewData.getRoomName()) ? getString(R.string.room_preview_try_join_an_unknown_room_default) : roomName));
 
                     // the room preview has some messages
                     if ((null != sRoomPreviewData.getRoomResponse()) && (null != sRoomPreviewData.getRoomResponse().messages)) {
-                        subInvitationTextView.setText(getString(R.string.room_preview_room_interactions_disabled));
+                        //  subInvitationTextView.setText(getString(R.string.room_preview_room_interactions_disabled));
                     }
                 }
 
@@ -4092,4 +4155,520 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             mSendImageView.performClick();
         }
     }
+
+    @OnTouch(R.id.room_send_image_view)
+    public boolean onTouchCropView(MotionEvent event) { // GitHub issue #4
+
+        return true;
+    }
+
+    private boolean showCameraIcon = true, showAttachmentIcon = true, showEmojiIcon = true;
+    private boolean isLocked = false;
+    private boolean isDeleting;
+    private boolean stopTrackingAction;
+    private Handler handler;
+
+    private float directionOffset, cancelOffset, lockOffset;
+    private float dp = 0;
+
+    int screenWidth, screenHeight;
+
+    private float lastX, lastY;
+    private float firstX, firstY;
+
+    private int audioTotalTime;
+    private TimerTask timerTask;
+    private Timer audioTimer;
+    private SimpleDateFormat timeFormatter;
+
+    private Animation animBlink, animJump, animJumpFast;
+
+    public enum UserBehaviour {
+        CANCELING,
+        LOCKING,
+        NONE
+    }
+
+    public enum RecordingBehaviour {
+        CANCELED,
+        LOCKED,
+        LOCK_DONE,
+        RELEASED
+    }
+
+    public interface RecordingListener {
+
+        void onRecordingStarted();
+
+        void onRecordingLocked();
+
+        void onRecordingCompleted();
+
+        void onRecordingCanceled();
+
+    }
+
+
+    boolean isLayoutDirectionRightToLeft;
+
+
+    private UserBehaviour userBehaviour = UserBehaviour.NONE;
+    private RecordingListener recordingListener;
+
+    private void setupRecording() {
+
+        imageViewSend.animate().scaleX(0f).scaleY(0f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+
+        mEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (s.toString().trim().isEmpty()) {
+                     if (imageViewSend.getVisibility() != View.GONE) {
+                      imageViewSend.setVisibility(View.GONE);
+                       imageViewSend.animate().scaleX(0f).scaleY(0f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+                     }
+
+                    if (showCameraIcon) {
+                        if (mStartCallLayout.getVisibility() != View.VISIBLE && !isLocked) {
+                            mStartCallLayout.setVisibility(View.VISIBLE);
+                            mStartCallLayout.animate().scaleX(1f).scaleY(1f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+                        }
+                    }
+
+                } else {
+                    if (mSendImageView.getVisibility() != View.VISIBLE && !isLocked) {
+                        mSendImageView.setVisibility(View.VISIBLE);
+                        mSendImageView.animate().scaleX(1f).scaleY(1f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+                    }
+
+                    if (showCameraIcon) {
+                        if (mStartCallLayout.getVisibility() != View.GONE) {
+                            mStartCallLayout.setVisibility(View.GONE);
+                            mStartCallLayout.animate().scaleX(0f).scaleY(0f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+                        }
+                    }
+                }
+            }
+        });
+
+        imageViewAudio.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View view, MotionEvent motionEvent) {
+
+                if (isDeleting) {
+                    return true;
+                }
+
+                if (motionEvent.getAction() == MotionEvent.ACTION_DOWN) {
+
+                    cancelOffset = (float) (screenWidth / 2.8);
+                    lockOffset = (float) (screenWidth / 2.5);
+
+                    if (firstX == 0) {
+                        firstX = motionEvent.getRawX();
+                    }
+
+                    if (firstY == 0) {
+                        firstY = motionEvent.getRawY();
+                    }
+
+                    handler = new Handler(Looper.getMainLooper());
+                    animBlink = AnimationUtils.loadAnimation(view.getContext(),
+                            R.anim.blink);
+                    animJump = AnimationUtils.loadAnimation(view.getContext(),
+                            R.anim.jump);
+                    animJumpFast = AnimationUtils.loadAnimation(view.getContext(),
+                            R.anim.jump_fast);
+
+                    timeFormatter = new SimpleDateFormat("m:ss", Locale.getDefault());
+
+                    DisplayMetrics displayMetrics = view.getContext().getResources().getDisplayMetrics();
+                    screenHeight = displayMetrics.heightPixels;
+                    screenWidth = displayMetrics.widthPixels;
+
+
+                    startRecord();
+
+                } else if (motionEvent.getAction() == MotionEvent.ACTION_UP
+                        || motionEvent.getAction() == MotionEvent.ACTION_CANCEL) {
+
+                    if (motionEvent.getAction() == MotionEvent.ACTION_UP) {
+                        stopRecording(RecordingBehaviour.RELEASED);
+                    }
+
+                } else if (motionEvent.getAction() == MotionEvent.ACTION_MOVE) {
+
+                    if (stopTrackingAction) {
+                        return true;
+                    }
+
+                    UserBehaviour direction = UserBehaviour.NONE;
+
+                    float motionX = Math.abs(firstX - motionEvent.getRawX());
+                    float motionY = Math.abs(firstY - motionEvent.getRawY());
+
+                    if (isLayoutDirectionRightToLeft ? (motionX > directionOffset && lastX > firstX && lastY > firstY) : (motionX > directionOffset && lastX < firstX && lastY < firstY)) {
+
+                        if (isLayoutDirectionRightToLeft ? (motionX > motionY && lastX > firstX) : (motionX > motionY && lastX < firstX)) {
+                            direction = UserBehaviour.CANCELING;
+
+                        } else if (motionY > motionX && lastY < firstY) {
+                            direction = UserBehaviour.LOCKING;
+                        }
+
+                    } else if (isLayoutDirectionRightToLeft ? (motionX > motionY && motionX > directionOffset && lastX > firstX) : (motionX > motionY && motionX > directionOffset && lastX < firstX)) {
+                        direction = UserBehaviour.CANCELING;
+                    } else if (motionY > motionX && motionY > directionOffset && lastY < firstY) {
+                        direction = UserBehaviour.LOCKING;
+                    }
+
+                    if (direction == UserBehaviour.CANCELING) {
+                        if (userBehaviour == UserBehaviour.NONE || motionEvent.getRawY() + imageViewAudio.getWidth() / 2 > firstY) {
+                            userBehaviour = UserBehaviour.CANCELING;
+                        }
+
+                        if (userBehaviour == UserBehaviour.CANCELING) {
+                            translateX(-(firstX - motionEvent.getRawX()));
+                        }
+                    } else if (direction == UserBehaviour.LOCKING) {
+                        if (userBehaviour == UserBehaviour.NONE || motionEvent.getRawX() + imageViewAudio.getWidth() / 2 > firstX) {
+                            userBehaviour = UserBehaviour.LOCKING;
+                        }
+
+                        if (userBehaviour == UserBehaviour.LOCKING) {
+                            translateY(-(firstY - motionEvent.getRawY()));
+                        }
+                    }
+
+                    lastX = motionEvent.getRawX();
+                    lastY = motionEvent.getRawY();
+                }
+                view.onTouchEvent(motionEvent);
+                return true;
+            }
+        });
+
+        imageViewStop.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                isLocked = false;
+                stopRecording(RecordingBehaviour.LOCK_DONE);
+            }
+        });
+
+
+    }
+
+
+    private void translateY(float y) {
+        if (y < -lockOffset) {
+            locked();
+            imageViewAudio.setTranslationY(0);
+            return;
+        }
+
+        if (layoutLock.getVisibility() != View.VISIBLE) {
+            layoutLock.setVisibility(View.VISIBLE);
+        }
+
+        imageViewAudio.setTranslationY(y);
+        layoutLock.setTranslationY(y / 2);
+        imageViewAudio.setTranslationX(0);
+    }
+
+    private void locked() {
+        stopTrackingAction = true;
+        stopRecording(RecordingBehaviour.LOCKED);
+        isLocked = true;
+    }
+
+    private void canceled() {
+        stopTrackingAction = true;
+        stopRecording(RecordingBehaviour.CANCELED);
+    }
+
+    private void translateX(float x) {
+
+        if (isLayoutDirectionRightToLeft ? x > cancelOffset : x < -cancelOffset) {
+            canceled();
+            imageViewAudio.setTranslationX(0);
+            layoutSlideCancel.setTranslationX(0);
+            return;
+        }
+
+        imageViewAudio.setTranslationX(x);
+        layoutSlideCancel.setTranslationX(x);
+        layoutLock.setTranslationY(0);
+        imageViewAudio.setTranslationY(0);
+
+        if (Math.abs(x) < imageViewMic.getWidth() / 2) {
+            if (layoutLock.getVisibility() != View.VISIBLE) {
+                layoutLock.setVisibility(View.VISIBLE);
+            }
+        } else {
+            if (layoutLock.getVisibility() != View.GONE) {
+                layoutLock.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    private void startRecord() {
+        //Toast.makeText(this, "Start grabacion", Toast.LENGTH_SHORT).show();
+        if (recordingListener != null)
+            recordingListener.onRecordingStarted();
+
+
+        stopTrackingAction = false;
+        mEditText.setVisibility(View.INVISIBLE);
+        mStartCallLayout.setVisibility(View.INVISIBLE);
+        mSendImageView.setVisibility(View.INVISIBLE);
+
+        imageViewAudio.animate().scaleXBy(1f).scaleYBy(1f).setDuration(200).setInterpolator(new OvershootInterpolator()).start();
+        timeText.setVisibility(View.VISIBLE);
+        layoutLock.setVisibility(View.VISIBLE);
+        layoutSlideCancel.setVisibility(View.VISIBLE);
+        imageViewMic.setVisibility(View.VISIBLE);
+        //layoutEffect2.setVisibility(View.VISIBLE);
+        //layoutEffect1.setVisibility(View.VISIBLE);
+
+        timeText.startAnimation(animBlink);
+        imageViewLockArrow.clearAnimation();
+        imageViewLock.clearAnimation();
+        imageViewLockArrow.startAnimation(animJumpFast);
+        imageViewLock.startAnimation(animJump);
+
+        if (audioTimer == null) {
+            audioTimer = new Timer();
+            timeFormatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+        }
+
+        timerTask = new TimerTask() {
+            @Override
+            public void run() {
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        timeText.setText(timeFormatter.format(new Date(audioTotalTime * 1000)));
+                        audioTotalTime++;
+                    }
+                });
+            }
+        };
+
+        audioTotalTime = 0;
+        audioTimer.schedule(timerTask, 0, 1000);
+    }
+
+
+    private void stopRecording(RecordingBehaviour recordingBehaviour) {
+
+        Toast.makeText(this, "Stop grabacion", Toast.LENGTH_SHORT).show();
+        stopTrackingAction = true;
+        firstX = 0;
+        firstY = 0;
+        lastX = 0;
+        lastY = 0;
+
+        userBehaviour = UserBehaviour.NONE;
+
+        imageViewAudio.animate().scaleX(1f).scaleY(1f).translationX(0).translationY(0).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+        layoutSlideCancel.setTranslationX(0);
+        layoutSlideCancel.setVisibility(View.GONE);
+
+        layoutLock.setVisibility(View.GONE);
+        layoutLock.setTranslationY(0);
+        imageViewLockArrow.clearAnimation();
+        imageViewLock.clearAnimation();
+
+        if (isLocked) {
+            return;
+        }
+
+        if (recordingBehaviour == RecordingBehaviour.LOCKED) {
+            imageAudio.setVisibility(View.VISIBLE);
+
+            if (recordingListener != null)
+                recordingListener.onRecordingLocked();
+
+        } else if (recordingBehaviour == RecordingBehaviour.CANCELED) {
+            timeText.clearAnimation();
+            timeText.setVisibility(View.INVISIBLE);
+            imageViewMic.setVisibility(View.INVISIBLE);
+            imageViewStop.setVisibility(View.GONE);
+            //layoutEffect2.setVisibility(View.GONE);
+            //layoutEffect1.setVisibility(View.GONE);
+
+            timerTask.cancel();
+            delete();
+
+            if (recordingListener != null)
+                recordingListener.onRecordingCanceled();
+
+        } else if (recordingBehaviour == RecordingBehaviour.RELEASED || recordingBehaviour == RecordingBehaviour.LOCK_DONE) {
+            timeText.clearAnimation();
+            timeText.setVisibility(View.INVISIBLE);
+            imageViewMic.setVisibility(View.INVISIBLE);
+            mEditText.setVisibility(View.VISIBLE);
+            /*if (showAttachmentIcon) {
+                imageViewAttachment.setVisibility(View.VISIBLE);
+            }
+            if (showCameraIcon) {
+                imageViewCamera.setVisibility(View.VISIBLE);
+            }
+            if (showEmojiIcon) {
+                imageViewEmoji.setVisibility(View.VISIBLE);
+            }
+
+             */
+            imageViewStop.setVisibility(View.GONE);
+            mEditText.requestFocus();
+            //layoutEffect2.setVisibility(View.GONE);
+            //layoutEffect1.setVisibility(View.GONE);
+
+            timerTask.cancel();
+
+            if (recordingListener != null)
+                recordingListener.onRecordingCompleted();
+        }
+    }
+
+    private void delete() {
+        imageViewMic.setVisibility(View.VISIBLE);
+        imageViewMic.setRotation(0);
+        isDeleting = true;
+        imageViewAudio.setEnabled(false);
+
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                isDeleting = false;
+                imageViewAudio.setEnabled(true);
+
+            }
+        }, 1250);
+
+        imageViewMic.animate().translationY(-dp * 150).rotation(180).scaleXBy(0.6f).scaleYBy(0.6f).setDuration(500).setInterpolator(new DecelerateInterpolator()).setListener(new Animator.AnimatorListener() {
+
+            @Override
+            public void onAnimationStart(Animator animation) {
+
+                float displacement = 0;
+
+                if (isLayoutDirectionRightToLeft) {
+                    displacement = dp * 40;
+                } else {
+                    displacement = -dp * 40;
+                }
+
+                dustin.setTranslationX(displacement);
+                dustin_cover.setTranslationX(displacement);
+
+                dustin_cover.animate().translationX(0).rotation(-120).setDuration(350).setInterpolator(new DecelerateInterpolator()).start();
+
+                dustin.animate().translationX(0).setDuration(350).setInterpolator(new DecelerateInterpolator()).setListener(new Animator.AnimatorListener() {
+                    @Override
+                    public void onAnimationStart(Animator animation) {
+                        dustin.setVisibility(View.VISIBLE);
+                        dustin_cover.setVisibility(View.VISIBLE);
+                    }
+
+                    @Override
+                    public void onAnimationEnd(Animator animation) {
+
+                    }
+
+                    @Override
+                    public void onAnimationCancel(Animator animation) {
+
+                    }
+
+                    @Override
+                    public void onAnimationRepeat(Animator animation) {
+
+                    }
+                }).start();
+            }
+
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                imageViewMic.animate().translationY(0).scaleX(1).scaleY(1).setDuration(350).setInterpolator(new LinearInterpolator()).setListener(
+                        new Animator.AnimatorListener() {
+                            @Override
+                            public void onAnimationStart(Animator animation) {
+
+                            }
+
+                            @Override
+                            public void onAnimationEnd(Animator animation) {
+                                imageViewMic.setVisibility(View.INVISIBLE);
+                                imageViewMic.setRotation(0);
+
+                                float displacement = 0;
+
+                                if (isLayoutDirectionRightToLeft) {
+                                    displacement = dp * 40;
+                                } else {
+                                    displacement = -dp * 40;
+                                }
+
+                                dustin_cover.animate().rotation(0).setDuration(150).setStartDelay(50).start();
+                                dustin.animate().translationX(displacement).setDuration(200).setStartDelay(250).setInterpolator(new DecelerateInterpolator()).start();
+                                dustin_cover.animate().translationX(displacement).setDuration(200).setStartDelay(250).setInterpolator(new DecelerateInterpolator()).setListener(new Animator.AnimatorListener() {
+                                    @Override
+                                    public void onAnimationStart(Animator animation) {
+
+                                    }
+
+                                    @Override
+                                    public void onAnimationEnd(Animator animation) {
+                                        mEditText.setVisibility(View.VISIBLE);
+                                        mEditText.requestFocus();
+                                    }
+
+                                    @Override
+                                    public void onAnimationCancel(Animator animation) {
+
+                                    }
+
+                                    @Override
+                                    public void onAnimationRepeat(Animator animation) {
+
+                                    }
+                                }).start();
+                            }
+
+                            @Override
+                            public void onAnimationCancel(Animator animation) {
+
+                            }
+
+                            @Override
+                            public void onAnimationRepeat(Animator animation) {
+
+                            }
+                        }
+                ).start();
+            }
+
+            @Override
+            public void onAnimationCancel(Animator animation) {
+
+            }
+
+            @Override
+            public void onAnimationRepeat(Animator animation) {
+
+            }
+        }).start();
+    }
+
+
 }
