@@ -30,9 +30,12 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
+import android.media.MediaPlayer;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Vibrator;
@@ -66,8 +69,11 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.FragmentManager;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import org.jetbrains.annotations.NotNull;
@@ -92,9 +98,13 @@ import org.matrix.androidsdk.data.RoomPreviewData;
 import org.matrix.androidsdk.data.RoomState;
 import org.matrix.androidsdk.data.RoomSummary;
 import org.matrix.androidsdk.db.MXLatestChatMessageCache;
+import org.matrix.androidsdk.db.MXMediaCache;
 import org.matrix.androidsdk.features.identityserver.IdentityServerNotConfiguredException;
 import org.matrix.androidsdk.fragments.MatrixMessageListFragment;
+import org.matrix.androidsdk.listeners.IMXMediaUploadListener;
 import org.matrix.androidsdk.listeners.MXEventListener;
+import org.matrix.androidsdk.listeners.MXMediaUploadListener;
+import org.matrix.androidsdk.rest.model.CreatedEvent;
 import org.matrix.androidsdk.rest.model.Event;
 import org.matrix.androidsdk.rest.model.PowerLevels;
 import org.matrix.androidsdk.rest.model.RoomMember;
@@ -103,6 +113,8 @@ import org.matrix.androidsdk.rest.model.StateEvent;
 import org.matrix.androidsdk.rest.model.User;
 import org.matrix.androidsdk.rest.model.message.Message;
 
+import java.io.File;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -112,6 +124,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 import java.util.TimeZone;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -155,6 +168,9 @@ import im.vector.widgets.Widget;
 import im.vector.widgets.WidgetsManager;
 import im.vector.widgets.model.JitsiWidgetProperties;
 import kotlin.Unit;
+
+import static android.Manifest.permission.RECORD_AUDIO;
+import static android.Manifest.permission.WRITE_EXTERNAL_STORAGE;
 
 /**
  * Displays a single room with messages.
@@ -274,8 +290,8 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     @BindView(R.id.room_end_call_image_view)
     View mStopCallLayout;
 
-    @BindView(R.id.layoutLock)
-    View layoutLock;
+    //@BindView(R.id.layoutLock)
+    //View layoutLock;
 
     @BindView(R.id.layoutDustin)
     View layoutDustin;
@@ -325,11 +341,11 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     @BindView(R.id.imageViewMic)
     ImageView imageViewMic;
-    @BindView(R.id.imageViewLockArrow)
-    ImageView imageViewLockArrow;
+    //@BindView(R.id.imageViewLockArrow)
+    //ImageView imageViewLockArrow;
 
-    @BindView(R.id.imageViewLock)
-    ImageView imageViewLock;
+    //@BindView(R.id.imageViewLock)
+    //ImageView imageViewLock;
 
     @BindView(R.id.imageViewStop)
     View imageViewStop;
@@ -385,11 +401,29 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     @BindView(R.id.room_preview_invitation_textview)
     TextView invitationTextView;
 
+    @BindView(R.id.room_preview_subinvitation_textview)
+    TextView subInvitationTextView;
+
+
     @BindView(R.id.imageViewAudio)
     View imageViewAudio;
 
     @BindView(R.id.imageAudio)
     View imageAudio;
+
+    //sounds settings
+
+    //private MediaRecorder mediaRecorder;
+    //private MediaPlayer mediaPlayer;
+    private static String fichero = Environment.getExternalStorageDirectory().getAbsolutePath() + "/audio.3gp";
+
+
+    String AudioSavePathInDevice = null;
+    MediaRecorder mediaRecorder;
+    Random random;
+    String RandomAudioFileName = "ABCDEFGHIJKLMNOP";
+    public static final int RequestPermissionCode = 1;
+    MediaPlayer mediaPlayer;
 
 
     // network events
@@ -793,7 +827,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         }
 
         if (PreferencesManager.sendMessageWithEnter(this)) {
-            // imeOptions="actionSend" only works with single line, so we remove multiline inputType
+            //timeOptions="actionSend" only works with single line, so we remove multiline inputType
             mEditText.setInputType(mEditText.getInputType() & ~EditorInfo.TYPE_TEXT_FLAG_MULTI_LINE);
             mEditText.setImeOptions(EditorInfo.IME_ACTION_SEND);
         }
@@ -2210,7 +2244,6 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             }
 
             if (timerTimeoutInMs > 0) {
-
                 try {
                     mTypingTimerTask = new TimerTask() {
                         public void run() {
@@ -2273,6 +2306,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
         mRoom.sendTypingNotification(typingStatus, notificationTimeoutMS, new SimpleApiCallback<Void>(this) {
             @Override
+
             public void onSuccess(Void info) {
                 // Reset last typing date
                 mLastTypingDate = 0;
@@ -2527,6 +2561,8 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         int img = R.drawable.ic_material_file;
         if (!PreferencesManager.sendMessageWithEnter(this) && mEditText.getText().length() > 0) {
             img = R.drawable.ic_material_send_green;
+            imageViewAudio.setVisibility(View.GONE);
+
         } else {
             switch (PreferencesManager.getSelectedDefaultMediaSource(this)) {
                 case MEDIA_SOURCE_VOICE:
@@ -2544,6 +2580,8 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
                     img = R.drawable.ic_material_videocam;
                     break;
             }
+
+            imageViewAudio.setVisibility(View.VISIBLE);
         }
         mSendImageView.setImageResource(img);
     }
@@ -2794,7 +2832,8 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     /**
      * Display the typing status in the notification area.
      */
-    private void onRoomTyping() {
+    private void
+    onRoomTyping() {
         mLatestTypingMessage = null;
 
         if (mRoom == null) {
@@ -3511,14 +3550,14 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             } else {
                 if ((null != roomEmailInvitation) && !TextUtils.isEmpty(roomEmailInvitation.email)) {
                     invitationTextView.setText(getString(R.string.room_preview_invitation_format, roomEmailInvitation.inviterName));
-                    //subInvitationTextView.setText(getString(R.string.room_preview_unlinked_email_warning, roomEmailInvitation.email));
+                    subInvitationTextView.setText(getString(R.string.room_preview_unlinked_email_warning, roomEmailInvitation.email));
                 } else {
                     invitationTextView.setText(getString(R.string.room_preview_try_join_an_unknown_room,
                             TextUtils.isEmpty(sRoomPreviewData.getRoomName()) ? getString(R.string.room_preview_try_join_an_unknown_room_default) : roomName));
 
                     // the room preview has some messages
                     if ((null != sRoomPreviewData.getRoomResponse()) && (null != sRoomPreviewData.getRoomResponse().messages)) {
-                        //  subInvitationTextView.setText(getString(R.string.room_preview_room_interactions_disabled));
+                        subInvitationTextView.setText(getString(R.string.room_preview_room_interactions_disabled));
                     }
                 }
 
@@ -4156,11 +4195,6 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         }
     }
 
-    @OnTouch(R.id.room_send_image_view)
-    public boolean onTouchCropView(MotionEvent event) { // GitHub issue #4
-
-        return true;
-    }
 
     private boolean showCameraIcon = true, showAttachmentIcon = true, showEmojiIcon = true;
     private boolean isLocked = false;
@@ -4216,7 +4250,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     private RecordingListener recordingListener;
 
     private void setupRecording() {
-
+        random = new Random();
         imageViewSend.animate().scaleX(0f).scaleY(0f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
 
         mEditText.addTextChangedListener(new TextWatcher() {
@@ -4231,10 +4265,11 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             @Override
             public void afterTextChanged(Editable s) {
                 if (s.toString().trim().isEmpty()) {
-                     if (imageViewSend.getVisibility() != View.GONE) {
-                      imageViewSend.setVisibility(View.GONE);
-                       imageViewSend.animate().scaleX(0f).scaleY(0f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
-                     }
+                    if (imageViewSend.getVisibility() != View.GONE) {
+                        imageViewSend.setVisibility(View.GONE);
+
+                        imageViewSend.animate().scaleX(0f).scaleY(0f).setDuration(100).setInterpolator(new LinearInterpolator()).start();
+                    }
 
                     if (showCameraIcon) {
                         if (mStartCallLayout.getVisibility() != View.VISIBLE && !isLocked) {
@@ -4363,10 +4398,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
                 stopRecording(RecordingBehaviour.LOCK_DONE);
             }
         });
-
-
     }
-
 
     private void translateY(float y) {
         if (y < -lockOffset) {
@@ -4375,12 +4407,12 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             return;
         }
 
-        if (layoutLock.getVisibility() != View.VISIBLE) {
-            layoutLock.setVisibility(View.VISIBLE);
-        }
+        //if (layoutLock.getVisibility() != View.VISIBLE) {
+        //  layoutLock.setVisibility(View.VISIBLE);
+        //}
 
         imageViewAudio.setTranslationY(y);
-        layoutLock.setTranslationY(y / 2);
+        //layoutLock.setTranslationY(y / 2);
         imageViewAudio.setTranslationX(0);
     }
 
@@ -4406,10 +4438,10 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
         imageViewAudio.setTranslationX(x);
         layoutSlideCancel.setTranslationX(x);
-        layoutLock.setTranslationY(0);
+        //layoutLock.setTranslationY(0);
         imageViewAudio.setTranslationY(0);
 
-        if (Math.abs(x) < imageViewMic.getWidth() / 2) {
+       /* if (Math.abs(x) < imageViewMic.getWidth() / 2) {
             if (layoutLock.getVisibility() != View.VISIBLE) {
                 layoutLock.setVisibility(View.VISIBLE);
             }
@@ -4417,33 +4449,37 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             if (layoutLock.getVisibility() != View.GONE) {
                 layoutLock.setVisibility(View.GONE);
             }
-        }
+        }*/
     }
 
     private void startRecord() {
         //Toast.makeText(this, "Start grabacion", Toast.LENGTH_SHORT).show();
+        startRecording();
+
         if (recordingListener != null)
             recordingListener.onRecordingStarted();
 
-
         stopTrackingAction = false;
+
+        mAvatarImageView.setVisibility(View.GONE);
+
         mEditText.setVisibility(View.INVISIBLE);
         mStartCallLayout.setVisibility(View.INVISIBLE);
         mSendImageView.setVisibility(View.INVISIBLE);
 
         imageViewAudio.animate().scaleXBy(1f).scaleYBy(1f).setDuration(200).setInterpolator(new OvershootInterpolator()).start();
         timeText.setVisibility(View.VISIBLE);
-        layoutLock.setVisibility(View.VISIBLE);
-        layoutSlideCancel.setVisibility(View.VISIBLE);
+        //layoutLock.setVisibility(View.VISIBLE);
+        //layoutSlideCancel.setVisibility(View.VISIBLE);
         imageViewMic.setVisibility(View.VISIBLE);
         //layoutEffect2.setVisibility(View.VISIBLE);
         //layoutEffect1.setVisibility(View.VISIBLE);
 
         timeText.startAnimation(animBlink);
-        imageViewLockArrow.clearAnimation();
-        imageViewLock.clearAnimation();
-        imageViewLockArrow.startAnimation(animJumpFast);
-        imageViewLock.startAnimation(animJump);
+        // imageViewLockArrow.clearAnimation();
+        // imageViewLock.clearAnimation();
+        //imageViewLockArrow.startAnimation(animJumpFast);
+        //imageViewLock.startAnimation(animJump);
 
         if (audioTimer == null) {
             audioTimer = new Timer();
@@ -4470,7 +4506,9 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     private void stopRecording(RecordingBehaviour recordingBehaviour) {
 
-        Toast.makeText(this, "Stop grabacion", Toast.LENGTH_SHORT).show();
+        stopRecording();
+
+
         stopTrackingAction = true;
         firstX = 0;
         firstY = 0;
@@ -4483,10 +4521,10 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         layoutSlideCancel.setTranslationX(0);
         layoutSlideCancel.setVisibility(View.GONE);
 
-        layoutLock.setVisibility(View.GONE);
-        layoutLock.setTranslationY(0);
-        imageViewLockArrow.clearAnimation();
-        imageViewLock.clearAnimation();
+        //layoutLock.setVisibility(View.GONE);
+        //layoutLock.setTranslationY(0);
+        // imageViewLockArrow.clearAnimation();
+        // imageViewLock.clearAnimation();
 
         if (isLocked) {
             return;
@@ -4503,6 +4541,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             timeText.setVisibility(View.INVISIBLE);
             imageViewMic.setVisibility(View.INVISIBLE);
             imageViewStop.setVisibility(View.GONE);
+
             //layoutEffect2.setVisibility(View.GONE);
             //layoutEffect1.setVisibility(View.GONE);
 
@@ -4528,8 +4567,12 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             }
 
              */
+
+            mAvatarImageView.setVisibility(View.VISIBLE);
             imageViewStop.setVisibility(View.GONE);
             mEditText.requestFocus();
+            mStartCallLayout.setVisibility(View.VISIBLE);
+            mSendImageView.setVisibility(View.VISIBLE);
             //layoutEffect2.setVisibility(View.GONE);
             //layoutEffect1.setVisibility(View.GONE);
 
@@ -4551,6 +4594,13 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             public void run() {
                 isDeleting = false;
                 imageViewAudio.setEnabled(true);
+
+                mSendImageView.setVisibility(View.VISIBLE);
+
+                mAvatarImageView.setVisibility(View.VISIBLE);
+
+                mStartCallLayout.setVisibility(View.VISIBLE);
+
 
             }
         }, 1250);
@@ -4631,6 +4681,9 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
                                     public void onAnimationEnd(Animator animation) {
                                         mEditText.setVisibility(View.VISIBLE);
                                         mEditText.requestFocus();
+                                        dustin.setVisibility(View.GONE);
+                                        dustin_cover.setVisibility(View.GONE);
+
                                     }
 
                                     @Override
@@ -4671,4 +4724,104 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
     }
 
 
+    //Voice Records Functions
+
+
+    public void startRecording() {
+        if (checkPermission()) {
+
+            AudioSavePathInDevice =
+                    Environment.getExternalStorageDirectory().getAbsolutePath() + "/" +
+                            CreateRandomAudioFileName(5) + "AudioRecording.mp3";
+
+            MediaRecorderReady();
+
+            try {
+                mediaRecorder.prepare();
+                Log.d("Grabando", "Empezando a grabar");
+                mediaRecorder.start();
+            } catch (IllegalStateException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+            }
+
+            Toast.makeText(this, "Recording started",
+                    Toast.LENGTH_LONG).show();
+        } else {
+            requestPermission();
+        }
+
+    }
+
+    public void MediaRecorderReady() {
+        mediaRecorder = new MediaRecorder();
+        mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+        mediaRecorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP);
+        mediaRecorder.setAudioEncoder(MediaRecorder.OutputFormat.AMR_NB);
+        mediaRecorder.setOutputFile(AudioSavePathInDevice);
+    }
+
+
+    public String CreateRandomAudioFileName(int string) {
+        StringBuilder stringBuilder = new StringBuilder(string);
+        int i = 0;
+        while (i < string) {
+            stringBuilder.append(RandomAudioFileName.
+                    charAt(random.nextInt(RandomAudioFileName.length())));
+
+            i++;
+        }
+        return stringBuilder.toString();
+    }
+
+    public void stopRecording() {
+        //mSession.getContentManager().
+        final Intent intent = getIntent();
+
+        Log.d("Grabando", "Deteniendo la grabacion");
+        //Toast.makeText(this, "Stop grabacion", Toast.LENGTH_SHORT).show();
+
+        mediaRecorder.stop();
+        //MXMediasCache
+        //mSession.getMediaCache().saveFileMediaForUrl(AudioSavePathInDevice,'.mp3');
+        mediaRecorder.release();
+        //mSession.getMediaCache().saveFileMediaForUrl("", AudioSavePathInDevice, ".mp3");
+        //ExternalApplicationsUtilKt.openFileSelection(this, null, true, REQUEST_FILES_REQUEST_CODE);
+
+        // mSession.getContentManager().uploadContent(filePath, callback);
+
+    }
+
+    public void reproducir(View view) {
+        mediaPlayer = new MediaPlayer();
+        try {
+            mediaPlayer.setDataSource(fichero);
+            mediaPlayer.prepare();
+            mediaPlayer.start();
+        } catch (IOException e) {
+            android.util.Log.d(LOG_TAG, "Fallo en la reproduccion");
+
+        }
+    }
+
+    public boolean checkPermission() {
+        int result = ContextCompat.checkSelfPermission(getApplicationContext(),
+                WRITE_EXTERNAL_STORAGE);
+        int result1 = ContextCompat.checkSelfPermission(getApplicationContext(),
+                RECORD_AUDIO);
+        return result == PackageManager.PERMISSION_GRANTED &&
+                result1 == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestPermission() {
+        ActivityCompat.requestPermissions(this, new
+                String[]{WRITE_EXTERNAL_STORAGE, RECORD_AUDIO}, RequestPermissionCode);
+    }
+
+    public void eliminarArchivo() {
+        new File(AudioSavePathInDevice).delete();
+    }
 }
