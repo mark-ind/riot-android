@@ -116,9 +116,14 @@ import org.matrix.androidsdk.rest.model.message.Message;
 import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.temporal.Temporal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.Date;
+import java.util.GregorianCalendar;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -3994,6 +3999,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         // Send voice
         if (isVoiceFeatureEnabled) {
             items.add(DialogListItem.SendVoice.INSTANCE);
+
         }
 
         // Send sticker
@@ -4506,7 +4512,7 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     private void stopRecording(RecordingBehaviour recordingBehaviour) {
 
-        stopRecording();
+        //stopCurrentRecording();
 
 
         stopTrackingAction = true;
@@ -4546,12 +4552,16 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
             //layoutEffect1.setVisibility(View.GONE);
 
             timerTask.cancel();
+            deleteLastAudioRecord(AudioSavePathInDevice);
             delete();
 
             if (recordingListener != null)
                 recordingListener.onRecordingCanceled();
 
         } else if (recordingBehaviour == RecordingBehaviour.RELEASED || recordingBehaviour == RecordingBehaviour.LOCK_DONE) {
+
+            stopCurrentRecording();
+
             timeText.clearAnimation();
             timeText.setVisibility(View.INVISIBLE);
             imageViewMic.setVisibility(View.INVISIBLE);
@@ -4726,19 +4736,28 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
 
     //Voice Records Functions
 
-
     public void startRecording() {
         if (checkPermission()) {
 
+            Date d = new Date();
+
+            Calendar cal = Calendar.getInstance();
+            int dayOfMonth = cal.get(Calendar.DAY_OF_MONTH);
+
+            int year = cal.get(Calendar.YEAR);
+            int month = cal.get(Calendar.MONTH)+1;
+            int day = cal.get(Calendar.DAY_OF_MONTH);
+
+            //AUD-2020109 EL159
+            String audioName = "AUD-" + String.valueOf(year) + String.valueOf(month) + String.valueOf(day) + " RIOT";
+
             AudioSavePathInDevice =
-                    Environment.getExternalStorageDirectory().getAbsolutePath() + "/" +
-                            CreateRandomAudioFileName(5) + "AudioRecording.mp3";
+                    Environment.getExternalStorageDirectory().getAbsolutePath() + "/" + audioName + ".m4a";
 
             MediaRecorderReady();
 
             try {
                 mediaRecorder.prepare();
-                Log.d("Grabando", "Empezando a grabar");
                 mediaRecorder.start();
             } catch (IllegalStateException e) {
                 // TODO Auto-generated catch block
@@ -4747,13 +4766,11 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
                 // TODO Auto-generated catch block
                 e.printStackTrace();
             }
-
-            Toast.makeText(this, "Recording started",
-                    Toast.LENGTH_LONG).show();
         } else {
             requestPermission();
         }
 
+        //deleteLastAudioRecord(AudioSavePathInDevice/);
     }
 
     public void MediaRecorderReady() {
@@ -4764,46 +4781,47 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
         mediaRecorder.setOutputFile(AudioSavePathInDevice);
     }
 
+//    public String CreateRandomAudioFileName(int string) {
+//        StringBuilder stringBuilder = new StringBuilder(string);
+//        int i = 0;
+//        while (i < string) {
+//            stringBuilder.append(RandomAudioFileName.
+//                    charAt(random.nextInt(RandomAudioFileName.length())));
+//            i++;
+//        }
+//        return stringBuilder.toString();
+//    }
 
-    public String CreateRandomAudioFileName(int string) {
-        StringBuilder stringBuilder = new StringBuilder(string);
-        int i = 0;
-        while (i < string) {
-            stringBuilder.append(RandomAudioFileName.
-                    charAt(random.nextInt(RandomAudioFileName.length())));
+    public void stopCurrentRecording() {
 
-            i++;
-        }
-        return stringBuilder.toString();
-    }
 
-    public void stopRecording() {
-        //mSession.getContentManager().
-        final Intent intent = getIntent();
-
-        Log.d("Grabando", "Deteniendo la grabacion");
-        //Toast.makeText(this, "Stop grabacion", Toast.LENGTH_SHORT).show();
-
+        Uri recordURL;
         mediaRecorder.stop();
-        //MXMediasCache
-        //mSession.getMediaCache().saveFileMediaForUrl(AudioSavePathInDevice,'.mp3');
         mediaRecorder.release();
-        //mSession.getMediaCache().saveFileMediaForUrl("", AudioSavePathInDevice, ".mp3");
-        //ExternalApplicationsUtilKt.openFileSelection(this, null, true, REQUEST_FILES_REQUEST_CODE);
 
-        // mSession.getContentManager().uploadContent(filePath, callback);
+        File recordSoundFile = new File(AudioSavePathInDevice);
+        recordURL = Uri.fromFile(recordSoundFile);
 
+        Bundle conData = new Bundle();
+        Intent intent = new Intent();
+        intent.setData(recordURL);
+        intent.putExtras(conData);
+
+        List<RoomMediaMessage> sharedDataItems = new ArrayList<>(RoomMediaMessage.listRoomMediaMessages(intent));
+        if (0 == sharedDataItems.size()) {
+            sharedDataItems.add(new RoomMediaMessage(Uri.parse(intent.getStringExtra(MediaPreviewerActivity.EXTRA_CAMERA_PICTURE_URI))));
+        }
+        mVectorRoomMediasSender.sendMedias(sharedDataItems);
+        //Delete the file created
+        //deleteLastAudioRecord(AudioSavePathInDevice);
     }
 
-    public void reproducir(View view) {
-        mediaPlayer = new MediaPlayer();
-        try {
-            mediaPlayer.setDataSource(fichero);
-            mediaPlayer.prepare();
-            mediaPlayer.start();
-        } catch (IOException e) {
-            android.util.Log.d(LOG_TAG, "Fallo en la reproduccion");
 
+    public void deleteLastAudioRecord(String audioPath) {
+        try {
+            new File(audioPath).delete();
+        } catch (Exception e) {
+            Log.e("Delete Error", e.toString());
         }
     }
 
@@ -4821,7 +4839,5 @@ public class VectorRoomActivity extends MXCActionBarActivity implements
                 String[]{WRITE_EXTERNAL_STORAGE, RECORD_AUDIO}, RequestPermissionCode);
     }
 
-    public void eliminarArchivo() {
-        new File(AudioSavePathInDevice).delete();
-    }
+
 }

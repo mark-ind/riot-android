@@ -284,9 +284,13 @@ public class VectorMessageListFragment extends MatrixMessageListFragment<VectorM
     public void onDestroy() {
         super.onDestroy();
 
-        for (MediaPlayer mediaPlayer : mMediaPlayers.values()) {
-            mediaPlayer.stop();
-            mediaPlayer.release();
+        try {
+            for (MediaPlayer mediaPlayer : mMediaPlayers.values()) {
+                mediaPlayer.stop();
+                mediaPlayer.release();
+            }
+        } catch (Exception e) {
+
         }
     }
 
@@ -944,8 +948,7 @@ public class VectorMessageListFragment extends MatrixMessageListFragment<VectorM
                         return;
                     }
 
-                    if (menuAction == ACTION_VECTOR_OPEN && mediaMimeType.startsWith("audio/")
-                            || mediaMimeType.startsWith("mp3/")) {
+                    if (menuAction == ACTION_VECTOR_OPEN && (mediaMimeType.startsWith("audio/"))) {
                         Log.e(LOG_TAG, "Using Media player " + file.getAbsolutePath());
 
                         for (MediaPlayer mp : mMediaPlayers.values()) {
@@ -967,13 +970,24 @@ public class VectorMessageListFragment extends MatrixMessageListFragment<VectorM
                                 String url = "data:audio/amr;base64," + base64EncodedString;
                                 mediaPlayer.setDataSource(url);
                                 mediaPlayer.prepare();
+                                //mediaPlayer.prepare();
                             } catch (IOException e) {
                                 e.printStackTrace();
+                                Log.e("Error to play", e.toString());
                             }
                         } else {
                             mediaPlayer = mMediaPlayers.get(mediaUrl);
                         }
-                        mediaPlayer.start();
+                        mediaPlayer.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
+                            @Override
+                            public void onPrepared(MediaPlayer mp) {
+
+                                mediaPlayer.start();
+                            }
+
+                        });
+
+
                     } else if (menuAction == ACTION_VECTOR_SAVE || menuAction == ACTION_VECTOR_OPEN) {
                         if (PermissionsToolsKt.checkPermissions(PermissionsToolsKt.PERMISSIONS_FOR_WRITING_FILES,
                                 VectorMessageListFragment.this, PermissionsToolsKt.PERMISSION_REQUEST_CODE)) {

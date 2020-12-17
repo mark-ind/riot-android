@@ -204,15 +204,18 @@ class VectorMessagesAdapterMediasHelper {
                     if ((null != imageView.getTag()) && (imageView.getTag().equals("playing"))) {
                         mVectorMessagesAdapterEventsListener.onEventAction(event, "", R.id.ic_action_pause_audio);
                         imageView.setImageResource(R.drawable.ic_baseline_play_arrow_24px);
+                        Toast.makeText(mContext, "paused", Toast.LENGTH_SHORT).show();
                         imageView.setTag("paused");
                     } else {
                         mVectorMessagesAdapterEventsListener.onEventAction(event, "", R.id.ic_action_play_audio);
+                        Toast.makeText(mContext, "Playing", Toast.LENGTH_SHORT).show();
                         imageView.setTag("playing");
                         if (!mPlayImageViews.containsKey(mediaUrl)) {
                             mPlayImageViews.put(mediaUrl, imageView);
                         }
                         refreshPlayImageViews();
                         imageView.setImageResource(R.drawable.ic_baseline_pause_24px);
+
                         final ProgressBar progressBar = playbackLayout.findViewById(R.id.media_progress_view);
                         refreshPlaybackProgress(progressBar, mediaUrl);
                     }

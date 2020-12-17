@@ -167,6 +167,7 @@ public class VectorMediaPickerActivity extends MXCActionBarActivity implements T
 
     // camera object
     private Camera mCamera;
+
     private int mCameraId;
     private int mCameraOrientation = 0;
 
